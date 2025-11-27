@@ -38,7 +38,7 @@
             top: 10px;
             left: 10px;
             color: white;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0,0,0,0.8);
             padding: 8px;
             border-radius: 5px;
             font-size: 11px;
@@ -67,7 +67,9 @@
 </head>
 <body>
     <div id="info">
-        β: <span id="beta">0</span>° γ: <span id="gamma">0</span>° α: <span id="alpha">0</span>°<br>
+        Acelerómetro X: <span id="accelX">0</span><br>
+        Acelerómetro Y: <span id="accelY">0</span><br>
+        Acelerómetro Z: <span id="accelZ">0</span><br>
         <span id="status">Presiona Iniciar</span>
     </div>
     <button id="startBtn">▶ Iniciar VR</button>
@@ -80,23 +82,27 @@
     <script>
         let scene, camera, renderer1, renderer2;
         let isRunning = false;
-        let baseRotationY = 0;
-        let currentRotationY = 0;
-        let currentRotationX = 0;
+        
+        // Variables para rotación basada en acelerómetro
+        let rotationX = 0;
+        let rotationY = 0;
+        let targetRotationX = 0;
+        let targetRotationY = 0;
 
         const eyeSeparation = 0.06;
+        const smoothing = 0.1; // Suavizado del movimiento
 
         function init() {
             // Crear escena
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87ceeb);
 
-            // Configurar cámara con FOV más apropiado para VR
+            // Configurar cámara
             camera = new THREE.PerspectiveCamera(90, window.innerWidth / 2 / window.innerHeight, 0.1, 100);
             camera.position.set(0, 1.6, 4);
             camera.lookAt(0, 1, 0);
 
-            // Iluminación mejorada
+            // Iluminación
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
             scene.add(ambientLight);
 
@@ -242,16 +248,16 @@
 
         function startVR() {
             document.getElementById('startBtn').style.display = 'none';
-            document.getElementById('status').textContent = 'VR Activo';
+            document.getElementById('status').textContent = 'VR Activo - Acelerómetro';
             
-            // Solicitar permiso de orientación (iOS 13+)
-            if (typeof DeviceOrientationEvent !== 'undefined' && 
-                typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission()
+            // Solicitar permiso de movimiento (iOS 13+)
+            if (typeof DeviceMotionEvent !== 'undefined' && 
+                typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission()
                     .then(response => {
                         if (response === 'granted') {
-                            window.addEventListener('deviceorientation', handleOrientation, true);
-                            document.getElementById('status').textContent = 'Sensor activado';
+                            window.addEventListener('devicemotion', handleMotion, true);
+                            document.getElementById('status').textContent = 'Acelerómetro activado';
                         } else {
                             document.getElementById('status').textContent = 'Permiso denegado';
                         }
@@ -262,36 +268,52 @@
                     });
             } else {
                 // Android y otros navegadores
-                window.addEventListener('deviceorientation', handleOrientation, true);
-                document.getElementById('status').textContent = 'Sensor activado';
+                window.addEventListener('devicemotion', handleMotion, true);
+                document.getElementById('status').textContent = 'Acelerómetro activado';
             }
             
             isRunning = true;
             animate();
         }
 
-        function handleOrientation(event) {
-            const alpha = event.alpha || 0;
-            const beta = event.beta || 0;
-            const gamma = event.gamma || 0;
+        function handleMotion(event) {
+            if (event.accelerationIncludingGravity) {
+                const accel = event.accelerationIncludingGravity;
+                
+                // Los valores del acelerómetro incluyen gravedad (típicamente -9.8 en Z cuando está plano)
+                const x = accel.x || 0;
+                const y = accel.y || 0;
+                const z = accel.z || 0;
 
-            document.getElementById('alpha').textContent = alpha.toFixed(0);
-            document.getElementById('beta').textContent = beta.toFixed(0);
-            document.getElementById('gamma').textContent = gamma.toFixed(0);
+                // Actualizar display
+                document.getElementById('accelX').textContent = x.toFixed(2);
+                document.getElementById('accelY').textContent = y.toFixed(2);
+                document.getElementById('accelZ').textContent = z.toFixed(2);
 
-            // Convertir a radianes y aplicar
-            currentRotationY = THREE.MathUtils.degToRad(gamma);
-            currentRotationX = THREE.MathUtils.degToRad(beta - 90);
+                // Convertir aceleración a rotación de cámara
+                // Cuando el celular está vertical (mirando al frente), Z es negativo
+                // Inclinación izquierda-derecha (roll) viene de X
+                // Inclinación arriba-abajo (pitch) viene de Y
+                
+                // Normalizar y mapear a radianes
+                // Limitamos el rango para evitar rotaciones extremas
+                targetRotationY = Math.max(-1, Math.min(1, x / 5)); // Roll (inclinación lateral)
+                targetRotationX = Math.max(-1, Math.min(1, -y / 5)); // Pitch (inclinación arriba/abajo)
+            }
         }
 
         function animate() {
             if (!isRunning) return;
             requestAnimationFrame(animate);
 
+            // Aplicar suavizado a la rotación
+            rotationX += (targetRotationX - rotationX) * smoothing;
+            rotationY += (targetRotationY - rotationY) * smoothing;
+
             // Aplicar rotación a la cámara
             camera.rotation.order = 'YXZ';
-            camera.rotation.y = -currentRotationY;
-            camera.rotation.x = currentRotationX;
+            camera.rotation.y = rotationY;
+            camera.rotation.x = rotationX;
 
             // Renderizar para ojo izquierdo
             const originalPos = camera.position.x;
