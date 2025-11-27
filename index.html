@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>VR Cocina Estereoscópica</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: Arial, sans-serif;
+            touch-action: none;
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            position: fixed;
+            top: 0;
+            left: 0;
+        }
+        canvas {
+            display: block;
+            width: 50% !important;
+            height: 100% !important;
+        }
+        #leftEye {
+            border-right: 1px solid #333;
+        }
+        #info {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 8px;
+            border-radius: 5px;
+            font-size: 11px;
+            z-index: 100;
+            pointer-events: none;
+        }
+        #startBtn {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 25px 50px;
+            font-size: 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 15px;
+            cursor: pointer;
+            z-index: 200;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        #startBtn:active {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        β: <span id="beta">0</span>° γ: <span id="gamma">0</span>° α: <span id="alpha">0</span>°<br>
+        <span id="status">Presiona Iniciar</span>
+    </div>
+    <button id="startBtn">▶ Iniciar VR</button>
+    <div id="container">
+        <canvas id="leftEye"></canvas>
+        <canvas id="rightEye"></canvas>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer1, renderer2;
+        let isRunning = false;
+        let baseRotationY = 0;
+        let currentRotationY = 0;
+        let currentRotationX = 0;
+
+        const eyeSeparation = 0.06;
+
+        function init() {
+            // Crear escena
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb);
+
+            // Configurar cámara con FOV más apropiado para VR
+            camera = new THREE.PerspectiveCamera(90, window.innerWidth / 2 / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 1.6, 4);
+            camera.lookAt(0, 1, 0);
+
+            // Iluminación mejorada
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+
+            const light1 = new THREE.DirectionalLight(0xffffff, 0.5);
+            light1.position.set(5, 10, 5);
+            scene.add(light1);
+
+            const light2 = new THREE.DirectionalLight(0xffffff, 0.3);
+            light2.position.set(-5, 5, -5);
+            scene.add(light2);
+
+            // Suelo
+            const floorGeometry = new THREE.PlaneGeometry(30, 30);
+            const floorMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x999999,
+                roughness: 0.8
+            });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // Paredes
+            const wallMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0xf5e6d3,
+                roughness: 0.9
+            });
+
+            // Pared trasera
+            const backWall = new THREE.Mesh(
+                new THREE.PlaneGeometry(30, 10),
+                wallMaterial
+            );
+            backWall.position.set(0, 5, -5);
+            scene.add(backWall);
+
+            // Pared izquierda
+            const leftWall = new THREE.Mesh(
+                new THREE.PlaneGeometry(30, 10),
+                wallMaterial
+            );
+            leftWall.position.set(-10, 5, 5);
+            leftWall.rotation.y = Math.PI / 2;
+            scene.add(leftWall);
+
+            // Pared derecha
+            const rightWall = new THREE.Mesh(
+                new THREE.PlaneGeometry(30, 10),
+                wallMaterial
+            );
+            rightWall.position.set(10, 5, 5);
+            rightWall.rotation.y = -Math.PI / 2;
+            scene.add(rightWall);
+
+            // Mesa
+            const tableTop = new THREE.Mesh(
+                new THREE.BoxGeometry(3, 0.08, 1.8),
+                new THREE.MeshStandardMaterial({ color: 0x8b4513 })
+            );
+            tableTop.position.set(0, 1, 0);
+            scene.add(tableTop);
+
+            // Patas de mesa
+            const legGeometry = new THREE.CylinderGeometry(0.04, 0.04, 0.92, 16);
+            const legMaterial = new THREE.MeshStandardMaterial({ color: 0x654321 });
+            
+            [[-1.35, 0.46, -0.8], [1.35, 0.46, -0.8], 
+             [-1.35, 0.46, 0.8], [1.35, 0.46, 0.8]].forEach(pos => {
+                const leg = new THREE.Mesh(legGeometry, legMaterial);
+                leg.position.set(...pos);
+                scene.add(leg);
+            });
+
+            // Tazas con colores vivos
+            const cupPositions = [
+                [-0.7, 1.15, -0.4, 0xff4444],
+                [0, 1.15, 0.3, 0x4444ff],
+                [0.8, 1.15, -0.2, 0x44ff44]
+            ];
+
+            cupPositions.forEach(([x, y, z, color]) => {
+                // Cuerpo de la taza
+                const cup = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.07, 0.06, 0.12, 16),
+                    new THREE.MeshStandardMaterial({ 
+                        color: color,
+                        roughness: 0.4,
+                        metalness: 0.1
+                    })
+                );
+                cup.position.set(x, y, z);
+                scene.add(cup);
+
+                // Asa
+                const handle = new THREE.Mesh(
+                    new THREE.TorusGeometry(0.05, 0.012, 8, 16, Math.PI),
+                    new THREE.MeshStandardMaterial({ color: color })
+                );
+                handle.position.set(x + 0.07, y, z);
+                handle.rotation.z = Math.PI / 2;
+                scene.add(handle);
+            });
+
+            // Platos
+            const platePositions = [
+                [-0.9, 1.05, 0.4],
+                [0.4, 1.05, 0],
+                [-0.2, 1.05, 0.7]
+            ];
+
+            platePositions.forEach(([x, y, z]) => {
+                const plate = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.14, 0.14, 0.015, 32),
+                    new THREE.MeshStandardMaterial({ 
+                        color: 0xffffff,
+                        roughness: 0.3
+                    })
+                );
+                plate.position.set(x, y, z);
+                scene.add(plate);
+            });
+
+            // Configurar renderizadores
+            const canvas1 = document.getElementById('leftEye');
+            const canvas2 = document.getElementById('rightEye');
+            
+            renderer1 = new THREE.WebGLRenderer({ canvas: canvas1, antialias: true });
+            renderer2 = new THREE.WebGLRenderer({ canvas: canvas2, antialias: true });
+            
+            updateSize();
+            window.addEventListener('resize', updateSize);
+        }
+
+        function updateSize() {
+            const width = window.innerWidth / 2;
+            const height = window.innerHeight;
+            
+            renderer1.setSize(width, height);
+            renderer2.setSize(width, height);
+            
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+        }
+
+        function startVR() {
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('status').textContent = 'VR Activo';
+            
+            // Solicitar permiso de orientación (iOS 13+)
+            if (typeof DeviceOrientationEvent !== 'undefined' && 
+                typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(response => {
+                        if (response === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation, true);
+                            document.getElementById('status').textContent = 'Sensor activado';
+                        } else {
+                            document.getElementById('status').textContent = 'Permiso denegado';
+                        }
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        document.getElementById('status').textContent = 'Error: ' + err.message;
+                    });
+            } else {
+                // Android y otros navegadores
+                window.addEventListener('deviceorientation', handleOrientation, true);
+                document.getElementById('status').textContent = 'Sensor activado';
+            }
+            
+            isRunning = true;
+            animate();
+        }
+
+        function handleOrientation(event) {
+            const alpha = event.alpha || 0;
+            const beta = event.beta || 0;
+            const gamma = event.gamma || 0;
+
+            document.getElementById('alpha').textContent = alpha.toFixed(0);
+            document.getElementById('beta').textContent = beta.toFixed(0);
+            document.getElementById('gamma').textContent = gamma.toFixed(0);
+
+            // Convertir a radianes y aplicar
+            currentRotationY = THREE.MathUtils.degToRad(gamma);
+            currentRotationX = THREE.MathUtils.degToRad(beta - 90);
+        }
+
+        function animate() {
+            if (!isRunning) return;
+            requestAnimationFrame(animate);
+
+            // Aplicar rotación a la cámara
+            camera.rotation.order = 'YXZ';
+            camera.rotation.y = -currentRotationY;
+            camera.rotation.x = currentRotationX;
+
+            // Renderizar para ojo izquierdo
+            const originalPos = camera.position.x;
+            camera.position.x = originalPos - eyeSeparation / 2;
+            renderer1.render(scene, camera);
+
+            // Renderizar para ojo derecho
+            camera.position.x = originalPos + eyeSeparation / 2;
+            renderer2.render(scene, camera);
+
+            // Restaurar posición
+            camera.position.x = originalPos;
+        }
+
+        // Iniciar
+        window.addEventListener('load', () => {
+            init();
+            // Render inicial para mostrar la escena
+            renderer1.render(scene, camera);
+            renderer2.render(scene, camera);
+        });
+
+        document.getElementById('startBtn').addEventListener('click', startVR);
+    </script>
+</body>
+</html>
